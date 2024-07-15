@@ -3,16 +3,15 @@
 namespace App\Http\Controllers\SupportTeam;
 
 use App\Helpers\Qs;
-use App\Http\Requests\UserRequest;
+use App\Http\Requests\UserUpdate;
+use App\Repositories\UserRepo;
 use App\Repositories\LocationRepo;
 use App\Repositories\MyClassRepo;
-use App\Repositories\UserRepo;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-
 
 class UserController extends Controller
 {
@@ -20,8 +19,8 @@ class UserController extends Controller
 
     public function __construct(UserRepo $user, LocationRepo $loc, MyClassRepo $my_class)
     {
-        $this->middleware('teamSA', ['only' => ['index', 'store', 'edit', 'update'] ]);
-        $this->middleware('super_admin', ['only' => ['reset_pass','destroy'] ]);
+        $this->middleware('teamSA', ['only' => ['index', 'store', 'edit', 'update']]);
+        $this->middleware('super_admin', ['only' => ['reset_pass', 'destroy']]);
 
         $this->user = $user;
         $this->loc = $loc;
@@ -109,7 +108,7 @@ class UserController extends Controller
         return Qs::jsonStoreOk();
     }
 
-    public function update(UserRequest $req, $id)
+    public function update(UserUpdate $req, $id)
     {
         $id = Qs::decodeHash($id);
 
@@ -119,40 +118,30 @@ class UserController extends Controller
         }
 
         $user = $this->user->find($id);
-
-        $user_type = $user->user_type;
-        $user_is_staff = in_array($user_type, Qs::getStaff());
-        $user_is_teamSA = in_array($user_type, Qs::getTeamSA());
-
         $data = $req->except(Qs::getStaffRecord());
-        $data['name'] = ucwords($req->name);
-        $data['user_type'] = $user_type;
 
-        if($user_is_staff && !$user_is_teamSA){
-            $data['username'] = Qs::getAppCode().'/STAFF/'.date('Y/m', strtotime($req->emp_date)).'/'.mt_rand(1000, 9999);
-        }
-        else {
-            $data['username'] = $user->username;
-        }
+        if ($req->hasFile('photo')) {
+            // Delete old photo if exists
+            if ($user->photo && Storage::exists($user->photo)) {
+                Storage::delete($user->photo);
+            }
 
-        if($req->hasFile('photo')) {
             $photo = $req->file('photo');
-            $f = Qs::getFileMetaData($photo);
-            $f['name'] = 'photo.' . $f['ext'];
-            $f['path'] = $photo->storeAs(Qs::getUploadPath($user_type).$user->code, $f['name']);
-            $data['photo'] = asset('storage/' . $f['path']);
+            $filename = time() . '.' . $photo->getClientOriginalExtension();
+            $path = $photo->storeAs('uploads/profile_photos', $filename);
+            $data['photo'] = $path;
         }
 
-        $this->user->update($id, $data);   /* UPDATE USER RECORD */
+        $data['name'] = ucwords($req->name);
+        $data['phone'] = $req->phone;
+        $data['phone2'] = $req->phone2;
+        $data['email'] = $req->email;
+        $data['username'] = $req->username;
+        $data['address'] = $req->address;
 
-        /* UPDATE STAFF RECORD */
-        if($user_is_staff){
-            $d2 = $req->only(Qs::getStaffRecord());
-            $d2['code'] = $data['username'];
-            $this->user->updateStaffRecord(['user_id' => $id], $d2);
-        }
+        $this->user->update($id, $data); 
 
-        return Qs::jsonUpdateOk();
+        return redirect()->back()->with('flash_success', 'Profile updated successfully');
     }
 
     public function show($user_id)
@@ -197,5 +186,4 @@ class UserController extends Controller
         $subjects = $this->my_class->findSubjectByTeacher($user->id);
         return ($subjects->count() > 0) ? true : false;
     }
-
 }
